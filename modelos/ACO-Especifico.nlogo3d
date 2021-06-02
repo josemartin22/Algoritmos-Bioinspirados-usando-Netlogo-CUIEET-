@@ -1,0 +1,1625 @@
+extensions [ rnd matrix ]
+
+globals [
+  ; Constants
+  lb-cross-section   ; lower bound cross section (in²)
+  ub-cross-section   ; upper bound cross section(in²)
+  increment-section  ; increment (in²)
+
+  iteration ; Iterations counter
+
+  ; Matrix of pheromone for each virtual path
+  trail-matrix
+
+  ; Vector with all cross-sections areas
+  sections-vector
+
+  ; Best cross sections
+  best-route
+  best-route-cost
+]
+
+breed [joints joint]
+joints-own [
+  n  ; Joint member
+]
+
+breed [ants ant]
+ants-own [
+  route
+  cost
+  penalty
+]
+
+links-own [
+  id         ; Edge identifier
+  group      ; Element Group number
+  edge-cost  ; Cost of the edge
+]
+
+
+to setup
+  clear-all
+  random-seed 123456789
+
+  set-observer
+  set-globals
+
+  setup-joints
+  setup-edges
+  setup-matrix-vector
+  setup-ants
+
+  set best-route generate-random-route
+  set best-route-cost (calculate-cost-of-route best-route)
+  set best-route-cost best-route-cost * (1 + penalty-function best-route) ^ 6
+
+  update-display
+  reset-ticks
+end
+
+
+to-report generate-random-route
+  ; Generate random route
+  let nm (precision (1 + ((ub-cross-section - lb-cross-section) / increment-section)) 0)
+  let random-route n-values (max [group] of links) [random nm]
+
+  ; Best solution [0.10 0.30 3.40 0.10 2.10 1.00 0.50 3.40]
+  ;set random-route [0 2 33 0 20 9 4 33] ; <- Vector of cross-section areas index
+
+  report random-route
+end
+
+
+to go
+
+; ACO Algorithm
+  if-else iteration < max-iterations [
+
+    find-route
+    ask ants [
+      ; Cost of their own route adding penalty
+      set cost calculate-cost-of-route route
+      set penalty penalty-function route
+      set cost cost * (1 + penalty) ^ 6
+
+      if penalty = 0 [show (word "FACTIBLE " route " Coste " cost)]
+
+      ; Update best known route
+      if (cost < best-route-cost) and (penalty = 0) [
+        set best-route-cost cost
+        set best-route route
+        update-display
+      ]
+    ]
+    if-else ranked-ant-system
+      [ ranked-global-pheromone-update ]
+    [
+      global-pheromone-update
+    ]
+
+    set iteration iteration + 1
+    tick
+  ]
+  [ stop ]
+end
+
+; Procedure to find a route
+to find-route
+  ; Number of design variables (groups)
+  let ng max [group] of links
+  let i 0
+
+  ; Calculate cross-section area for each design variable
+  while [i < ng]
+  [
+    ask ants [
+      let row-design-variable (matrix:get-row trail-matrix i)
+      let cross-sections-prob (calculate-probabilities row-design-variable)
+      let j (calculate-max cross-sections-prob)
+      set route (replace-item i route j)
+      decrease-pheromone-path i j
+    ]
+    set i (i + 1)
+  ]
+end
+
+to-report calculate-probabilities [row]
+  let probabilities []
+
+  let i 0
+  while [i < (length row)]
+  [
+    let j-th-prob ( ((item i row) ^ alpha) * (1 / (item i sections-vector)) ^ beta )
+    set probabilities (lput j-th-prob probabilities)
+    set i (i + 1)
+  ]
+  report probabilities
+end
+
+to-report calculate-max [v-probabilities]
+
+  let index 0
+  let max-value (item 0 v-probabilities)
+
+  let i 1
+  while [i < (length v-probabilities)] [
+    let value (item i v-probabilities)
+    ; Update the highest known probability
+    if value > max-value [
+      set max-value value
+      set index i
+    ]
+    set i (i + 1)
+  ]
+  report index
+end
+
+; Local pheromone update schema
+to decrease-pheromone-path [design-variable selected-path]
+
+  let i design-variable
+  let j selected-path
+  let new-value (epsilon * (matrix:get trail-matrix i j))
+  set trail-matrix (matrix:set-and-report trail-matrix i j new-value)
+
+end
+
+
+; Calculate the length of a route
+to-report calculate-cost-of-route [given-route]
+
+  let route-cost 0
+  let edges [self] of links
+
+  ; Objective function (minimize W = sum (di * Li * Ai))
+  foreach edges [ edge ->
+    let member-group [group] of edge
+
+    ; Traslation function from i-th member-group to section-area
+    let cross-section-area (item (item (member-group - 1) given-route) sections-vector)
+
+    ; Calculate the weigth of edge
+    set route-cost route-cost + (density * ([edge-cost] of edge) * cross-section-area)
+  ]
+  report route-cost
+end
+
+
+; Procedure that calculates the penalty for a given solution
+to-report penalty-function [given-route]
+
+  let n-nodes count joints
+  let n-links count links
+
+  ; For each truss member, get his cross-section area from the given solution
+
+  let A []
+  set A (lput (item (item 0 given-route) sections-vector) A)
+  set A (lput (item (item 1 given-route) sections-vector) A)
+  set A (lput (item (item 1 given-route) sections-vector) A)
+  set A (lput (item (item 1 given-route) sections-vector) A)
+  set A (lput (item (item 1 given-route) sections-vector) A)
+  set A (lput (item (item 2 given-route) sections-vector) A)
+  set A (lput (item (item 2 given-route) sections-vector) A)
+  set A (lput (item (item 2 given-route) sections-vector) A)
+  set A (lput (item (item 2 given-route) sections-vector) A)
+  set A (lput (item (item 3 given-route) sections-vector) A)
+  set A (lput (item (item 3 given-route) sections-vector) A)
+  set A (lput (item (item 4 given-route) sections-vector) A)
+  set A (lput (item (item 4 given-route) sections-vector) A)
+  set A (lput (item (item 5 given-route) sections-vector) A)
+  set A (lput (item (item 5 given-route) sections-vector) A)
+  set A (lput (item (item 5 given-route) sections-vector) A)
+  set A (lput (item (item 5 given-route) sections-vector) A)
+  set A (lput (item (item 6 given-route) sections-vector) A)
+  set A (lput (item (item 6 given-route) sections-vector) A)
+  set A (lput (item (item 6 given-route) sections-vector) A)
+  set A (lput (item (item 6 given-route) sections-vector) A)
+  set A (lput (item (item 7 given-route) sections-vector) A)
+  set A (lput (item (item 7 given-route) sections-vector) A)
+  set A (lput (item (item 7 given-route) sections-vector) A)
+  set A (lput (item (item 7 given-route) sections-vector) A)
+
+  ;Matrix with Degree of Freedom
+  let Re matrix:transpose matrix:from-row-list [[0 0 0][0 0 0][0 0 0][0 0 0][0 0 0][0 0 0][1 1 1][1 1 1][1 1 1][1 1 1]]
+  let w matrix:dimensions Re ; Contiene dimensiones [3x10]
+  let S matrix:make-constant (3 * item 1 w) (3 * item 1 w) 0 ; Stiffness matrix [30x30]
+  let U matrix:minus 1 Re  ; Nodes-dimensions with degree of freedom
+  let f (range 18)  ; Index of nodes-dimensions with defree of freedom != 0 (constant)
+
+  let Tj matrix:make-constant 3 n-links 0
+
+  ; Two lists with the enumeration of the first and second joints of edges
+  let list-1-edges (list 1 1 2 1 2 2 2 1 1 3 4 3 5 3 6 4 5 4 3 5 6 6 3 4 5)
+  let list-2-edges (list 2 4 3 5 6 4 5 3 6 6 5 4 6 10 7 9 8 7 8 10 9 10 7 8 9)
+
+  let edges [self] of links
+  foreach edges [ edge ->
+
+    ; Temporaly variables of each loop
+    let H [] ; Pair of nodes that composes the edge
+    let len 0
+    let member-group 0
+    let n-id 0
+
+    ask edge [
+      set H sort ([self] of both-ends)
+      set len edge-cost
+      set member-group group
+      set n-id (id - 1)
+    ]
+
+    let H1 map [x -> x * 10] (list ([xcor] of (item 0 H)) ([ycor] of item 0 H) ([zcor] of item 0 H))
+    let H2 map [x -> x * 10] (list ([xcor] of (item 1 H)) ([ycor] of item 1 H) ([zcor] of item 1 H))
+
+    ; Diference of coordinates
+    let C (map - H2 H1)
+
+    ; Divide by the module (length of each member truss)
+    let T matrix:from-row-list (list (map [ x -> x / len ] C))
+    let T' matrix:transpose T ; Transpose of T
+    let sl T' matrix:* T; Lambda matrix
+
+    ; Translation function from i-th member-group to section-area
+    let cross-section-area (item (item (member-group - 1) given-route) sections-vector)
+
+    ; Component G to calculate
+    let G (elasticity * (cross-section-area / len))
+    matrix:set-column Tj n-id (item 0 (matrix:to-row-list (G matrix:* T)))
+
+    let tmp1 (range ((([n] of item 0 H) * 3) - 2) ((([n] of item 0 H) * 3) + 1))
+    let tmp2 (range ((([n] of item 1 H) * 3) - 2) ((([n] of item 1 H) * 3) + 1))
+    let tmp (sentence tmp1 tmp2)
+
+    ; Create the transformation lambda matrix [[sl -sl][-sl sl]]
+    let l-matrix matrix:make-constant 6 6 0
+    let n-sl (matrix:map [x -> -1 * x] sl)
+
+    let i 0
+    while [i < 3] [
+      let row-i (sentence (matrix:get-row sl i) (matrix:get-row n-sl i))
+      matrix:set-row l-matrix i row-i
+      set i (i + 1)
+    ]
+    set i 0
+    while [i < 3] [
+      let row-i (sentence (matrix:get-row n-sl i) (matrix:get-row sl i))
+      matrix:set-row l-matrix (i + 3) row-i
+      set i (i + 1)
+    ]
+
+    ; Multiply by component G
+    set l-matrix (matrix:map [x -> G * x] l-matrix)
+
+    ; Modify the general Stiffness matrix
+    let tmp-tam (length tmp)
+
+    set i 0
+    ; Iterate over rows of the submatrix
+    while [i < tmp-tam] [
+      let row ((item i tmp) - 1)
+      let j 0
+      ; Iterate over columns of the submatrix
+      while [j < tmp-tam] [
+        let column ((item j tmp) - 1)
+        ; Modify the value
+        let new-value ((matrix:get S row column) + (matrix:get l-matrix i j))
+        set S (matrix:set-and-report S row column new-value)
+        set j (j + 1)
+      ]
+      set i (i + 1)
+    ]
+  ]
+
+  ; Resolve the system of linear equations
+  let load (list (map [x -> 1e3 * x ] (list 1 -10 -10 0 -10 -10 0.5 0 0 0 0 0 0 0 0 0.6 0 0))) ; Load Case 1
+  set load (matrix:transpose (matrix:from-row-list load))
+  let sub-S (matrix:submatrix S 0 0 18 18)
+
+  let solution (item 0 (matrix:to-row-list (matrix:transpose (matrix:solve sub-S load))))
+
+  ; Update the new values of U with the respect load
+  let j 0
+  while [j < 6] [
+    let i 0
+    while [i < 3] [
+      let new-value (item ((3 * j) + i) solution)
+      set U (matrix:set-and-report U i j new-value)
+      set i (i + 1)
+    ]
+    set j (j + 1)
+  ]
+
+  ; Create two submatrix for respective U sub-sets of columns
+  let subU-1 matrix:make-constant 3 n-links 0
+  let subU-2 matrix:make-constant 3 n-links 0
+
+  let i 0
+  while [i < n-links] [
+    let index1 ((item i list-1-edges) - 1)
+    let index2 ((item i list-2-edges) - 1)
+    matrix:set-column subU-1 i (matrix:get-column U index1)
+    matrix:set-column subU-2 i (matrix:get-column U index2)
+    set i (i + 1)
+  ]
+  ; Difference of two subU matrices
+  let subU-dif (subU-2 matrix:- subU-1)
+
+  let F-product matrix:make-constant 3 n-links 0
+  set F-product (matrix:times-element-wise Tj subU-dif)
+
+  let F-sum []
+  set i 0
+  while [i < n-links] [
+    set F-sum (lput (sum (matrix:get-column F-product i)) F-sum)
+    set i (i + 1)
+  ]
+
+  ; Calculate the Tension/Compression Stress
+  set F-sum (map [x -> abs(x) ] F-sum)
+  let TS (map [ [x y] -> x / y ] F-sum A)
+  set TS (map [ x -> (x / allowable-tension) - 1 ] TS)
+
+  ; Calculate the Joints Displacement
+  let JS (matrix:map [x -> abs(x)] (matrix:transpose U))
+  set JS (matrix:map [x -> (x / displacement-limit) - 1] JS)
+
+  ; Check how many items are positive (> 0)
+  let count-TS (sum (filter [x -> x > 0] TS))
+  let count-JS (sum (filter [x -> x > 0] (reduce sentence (matrix:to-row-list JS))))
+
+  let penalization (count-TS + count-JS)
+  report penalization
+end
+
+
+; Global pheromone update schema for ACO
+to global-pheromone-update
+  ; Update trail-matrix with respective evaporation rate
+  set trail-matrix (matrix:map [ x -> x * (1 - rho)] trail-matrix)
+
+  ; Add pheromone by each ant
+  ask ants [
+    let route-cost cost
+    ; Add for each virtual path selected an amount of pheromone
+    let i 0
+    while [i < (length route)] [
+      let j (item i route)
+      let actual-value (matrix:get trail-matrix i j)
+      let new-value (actual-value + (1 / route-cost))
+      set trail-matrix (matrix:set-and-report trail-matrix i j new-value)
+      set i (i + 1)
+    ]
+  ]
+end
+
+; Global pheromone update schema for Ranked Ant System
+to ranked-global-pheromone-update
+
+  ; Add pheromone by elitist ant and a selected number of them (rank)
+  ; Ranked the ants by cost and select the top-ranked-number best
+  let ants-rank (sort-on [cost] ants)
+  set ants-rank (sublist ants-rank 0 (top-ranked-number + 1))
+
+  ; Update trail-matrix with respective evaporation rate
+  set trail-matrix (matrix:map [ x -> x * (1 - rho)] trail-matrix)
+
+  let i 0
+  while [i < top-ranked-number] [
+
+    let a (item i ants-rank)
+    let elitist-route best-route
+    let elitist-cost calculate-cost-of-route elitist-route
+
+    ; Pheromone update of each ranked ant
+    ask a [
+      let route-cost cost
+      ; Add for each virtual path selected an amount of pheromone
+      let j 0
+      while [j < (length route)] [
+        let k (item j route)
+
+        ; Elitist influence
+        let k' (item j elitist-route)
+        let elitist-influence 0
+        if (k = k') [ set elitist-influence (1 / elitist-cost) ]
+
+        ; Update following the rank system schema
+        let actual-value (matrix:get trail-matrix j k)
+        let new-value (actual-value + rho * ((top-ranked-number * elitist-influence) + ((top-ranked-number - i)*(1 / route-cost))))
+        set trail-matrix (matrix:set-and-report trail-matrix j k new-value)
+        set j (j + 1)
+      ]
+    ]
+    ; Next ranked ant
+    set i (i + 1)
+  ]
+end
+
+; Setup the ants
+to setup-ants
+  create-ants ants-population-size [
+
+    ; Each ant is randomly assigned to one joint i as the starting
+    ; point of its tour (where i = 1, 2, ..., members of the truss)
+    let begin one-of joints
+    setxyz [xcor] of begin [ycor] of begin [zcor] of begin
+    hide-turtle
+    pen-down
+
+    ; Set all design variables to zero
+    set route n-values (max [group] of links) [0]
+    set cost (calculate-cost-of-route route)
+    set penalty 0
+  ]
+end
+
+; Setup the observer position
+to set-observer
+  orbit-down 75
+  orbit-right 48
+end
+
+; Setup the constants of 25-Bar Truss Problem
+to set-globals
+  set lb-cross-section 0.1 ; in²
+  set ub-cross-section 3.4 ; in²
+  set increment-section 0.1 ; in²
+  set iteration 0
+end
+
+; Setup the joints (nodes)
+to setup-joints
+
+  set-default-shape joints "circle"
+
+  ; Coordinates for 35-Bar Truss (inches)
+  create-joints 1 [set n 1 set color white setxyz -3.75 0 10]
+  create-joints 1 [set n 2 set color white setxyz 3.75 0 10]
+  create-joints 1 [set n 3 set color white setxyz -3.75 3.75 0]
+  create-joints 1 [set n 4 set color white setxyz 3.75 3.75 0]
+  create-joints 1 [set n 5 set color white setxyz 3.75 -3.75 0]
+  create-joints 1 [set n 6 set color white setxyz -3.75 -3.75 0]
+  create-joints 1 [set n 7 set color white setxyz -10 10 -10]
+  create-joints 1 [set n 8 set color white setxyz 10 10 -10]
+  create-joints 1 [set n 9 set color white setxyz 10 -10 -10]
+  create-joints 1 [set n 10 set color white setxyz -10 -10 -10]
+
+  ask patches with [pzcor <= -11] [set pcolor grey]
+
+end
+
+; Initialize the matrix vector with minimun pheromone value
+to setup-matrix-vector
+
+  ; Initialize the trail-matrix of pheromones with W-min
+  let min-weight 0
+
+  let edges [self] of links
+  foreach edges [ edge ->
+    set min-weight min-weight + (density * 10 * ([link-length] of edge) * lb-cross-section)
+  ]
+
+  ; Trail matrix (ng x nm)
+  let ng max [group] of links
+  let nm (precision (1 + ((ub-cross-section - lb-cross-section) / increment-section)) 0)
+
+  ;Initialize values of trail-matrix
+  set trail-matrix (matrix:make-constant ng nm (1 / min-weight)) ; Aprox 0.03
+
+  ; Generate vector of different cross-sections areas
+  set sections-vector []
+
+  let i 0
+  while [i < nm] [
+    set sections-vector (lput (precision ((i * increment-section) + lb-cross-section) 1) sections-vector)
+    set i (i + 1)
+  ]
+end
+
+
+; Visualization of the best cross-sections areas
+to update-display
+
+  ; For each design variable, change the sections
+  let i 0
+  while [i < (length best-route)]
+  [
+    let j (item i best-route)
+    let cross-section (item j sections-vector)
+
+    ask links with [group = i + 1]
+    [
+      set color [0 255 0]
+      ; Pause to apreciate the change of cross-section area
+      wait 0.05
+
+      ; Set color according to the thickness
+      set thickness cross-section / (ub-cross-section - lb-cross-section)
+      let new-color 1 - ((cross-section - lb-cross-section) / (ub-cross-section - lb-cross-section))
+      set new-color (new-color * (99.9 - 91) + 91)
+      set color new-color
+    ]
+    set i (i + 1)
+  ]
+end
+
+; Get the list with cross-sections areas for a given solution
+to-report get-sections [given-route]
+let i 0
+let sections []
+while [i < length given-route] [
+   let s (item (item i given-route) sections-vector)
+   set sections lput s sections
+   set i i + 1
+]
+report sections
+end
+
+
+to setup-edges
+
+  set-default-shape links "truss"
+
+  ; Element Information for 25-Bar Truss Topology
+
+  ask joints with [n = 1] [
+    create-links-to (joints with [n = 2]) [
+      set id 1
+      set group 1
+    ]
+    create-links-to (joints with [n = 4]) [
+      set id 2
+      set group 2
+    ]
+    create-links-to (joints with [n = 5]) [
+      set id 4
+      set group 2
+    ]
+    create-links-to (joints with [n = 3]) [
+      set id 8
+      set group 3
+    ]
+    create-links-to (joints with [n = 6]) [
+      set id 9
+      set group 3
+    ]
+  ]
+
+  ask joints with [n = 2] [
+    create-links-to (joints with [n = 3]) [
+      set id 3
+      set group 2
+    ]
+    create-links-to (joints with [n = 6]) [
+      set id 5
+      set group 2
+    ]
+    create-links-to (joints with [n = 4]) [
+      set id 6
+      set group 3
+    ]
+    create-links-to (joints with [n = 5]) [
+      set id 7
+      set group 3
+    ]
+  ]
+
+  ask joints with [n = 3] [
+    create-links-to (joints with [n = 4]) [
+      set id 12
+      set group 5
+    ]
+    create-links-to (joints with [n = 10]) [
+      set id 14
+      set group 6
+    ]
+    create-links-to (joints with [n = 8]) [
+      set id 19
+      set group 7
+    ]
+    create-links-to (joints with [n = 7]) [
+      set id 23
+      set group 8
+    ]
+  ]
+
+  ask joints with [n = 4] [
+    create-links-to (joints with [n = 9]) [
+      set id 16
+      set group 6
+    ]
+    create-links-to (joints with [n = 7]) [
+      set id 18
+      set group 7
+    ]
+    create-links-to (joints with [n = 8]) [
+      set id 24
+      set group 8
+    ]
+  ]
+
+  ask joints with [n = 5] [
+    create-links-to (joints with [n = 4]) [
+      set id 11
+      set group 4
+    ]
+    create-links-to (joints with [n = 8]) [
+      set id 17
+      set group 6
+    ]
+    create-links-to (joints with [n = 10]) [
+      set id 20
+      set group 7
+    ]
+    create-links-to (joints with [n = 9]) [
+      set id 25
+      set group 8
+    ]
+  ]
+
+  ask joints with [n = 6] [
+    create-links-to (joints with [n = 3]) [
+      set id 10
+      set group 4
+    ]
+    create-links-to (joints with [n = 5]) [
+      set id 13
+      set group 5
+    ]
+    create-links-to (joints with [n = 7]) [
+      set id 15
+      set group 6
+    ]
+    create-links-to (joints with [n = 9]) [
+      set id 21
+      set group 7
+    ]
+  ]
+
+  ask joints with [n = 10] [
+    create-links-to (joints with [n = 6]) [
+      set id 22
+      set group 8
+    ]
+  ]
+
+  ; Initialize lenght of each truss member
+  ask links [ set edge-cost (link-length * 10) ]
+
+end
+@#$#@#$#@
+GRAPHICS-WINDOW
+0
+0
+411
+412
+-1
+-1
+13.0
+1
+10
+1
+1
+1
+0
+1
+1
+1
+-15
+15
+-15
+15
+-15
+15
+1
+0
+1
+ticks
+30.0
+
+BUTTON
+65
+62
+149
+104
+setup
+setup
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+SLIDER
+219
+58
+422
+91
+ants-population-size
+ants-population-size
+0
+100
+20.0
+1
+1
+NIL
+HORIZONTAL
+
+BUTTON
+65
+111
+149
+155
+go
+go
+T
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+SLIDER
+448
+57
+620
+90
+alpha
+alpha
+0
+20
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+448
+96
+620
+129
+beta
+beta
+1
+20
+2.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+449
+138
+621
+171
+rho
+rho
+0
+0.99
+0.55
+0.01
+1
+NIL
+HORIZONTAL
+
+BUTTON
+66
+161
+149
+203
+step
+go
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+SLIDER
+449
+192
+621
+225
+epsilon
+epsilon
+0
+1
+0.15
+0.01
+1
+NIL
+HORIZONTAL
+
+MONITOR
+191
+523
+281
+568
+Best Weight
+calculate-cost-of-route best-route
+3
+1
+11
+
+MONITOR
+329
+524
+545
+569
+CrossSections
+get-sections best-route
+2
+1
+11
+
+SWITCH
+221
+145
+423
+178
+ranked-ant-system
+ranked-ant-system
+1
+1
+-1000
+
+SLIDER
+221
+188
+424
+221
+top-ranked-number
+top-ranked-number
+1
+ants-population-size - 1
+15.0
+1
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+647
+106
+797
+124
+Visibility intensity
+12
+0.0
+1
+
+TEXTBOX
+643
+67
+793
+85
+Pheromone intensity
+12
+0.0
+1
+
+TEXTBOX
+645
+140
+795
+170
+Global pheromone evaporation rate
+12
+0.0
+1
+
+TEXTBOX
+647
+192
+797
+222
+Local pheromone evaporation rate
+12
+0.0
+1
+
+TEXTBOX
+319
+15
+584
+45
+Ant Colony System Parameters
+16
+0.0
+1
+
+TEXTBOX
+341
+606
+540
+628
+Truss Design Parameters
+16
+0.0
+1
+
+SLIDER
+102
+657
+274
+690
+density
+density
+0.01
+20
+0.1
+0.01
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+294
+664
+444
+682
+Material density (lb/in³)
+12
+0.0
+1
+
+SLIDER
+102
+702
+274
+735
+elasticity
+elasticity
+1000000
+100000000
+1.0E7
+1000000
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+296
+709
+460
+727
+Modulus of elasticity (ksi)
+12
+0.0
+1
+
+SLIDER
+492
+659
+665
+692
+displacement-limit
+displacement-limit
+0.05
+1
+0.35
+0.05
+1
+NIL
+HORIZONTAL
+
+TEXTBOX
+680
+667
+830
+697
+Max. joint displacement limitation (in)
+12
+0.0
+1
+
+TEXTBOX
+682
+718
+858
+736
+Max tension suported (ksi)
+12
+0.0
+1
+
+SLIDER
+492
+704
+666
+737
+allowable-tension
+allowable-tension
+0
+100000
+40000.0
+500
+1
+NIL
+HORIZONTAL
+
+PLOT
+53
+259
+422
+504
+Solutions
+Iteration
+Weight
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"best" 1.0 0 -2674135 true "" "if ticks > 1 [\nplot calculate-cost-of-route best-route\n]"
+"avg" 1.0 0 -10899396 true "" "if ticks > 1 [\nlet sum-cost 0\nask ants [set sum-cost (sum-cost + calculate-cost-of-route route)]\nplot (sum-cost / ants-population-size)\n]"
+"worst" 1.0 0 -13345367 true "" "if ticks > 1 [\nlet max-route ([route] of (max-one-of ants [cost]))\nplot calculate-cost-of-route max-route\n]"
+
+PLOT
+439
+260
+789
+505
+Penalty
+Iteration
+Penalty
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"best" 1.0 0 -2674135 true "" "if ticks > 1 [\nplot penalty-function best-route\n]"
+"avg" 1.0 0 -10899396 true "" "if ticks > 1 [\nlet sum-penalty 0\nask ants [set sum-penalty (sum-penalty + penalty-function route)]\nplot (sum-penalty / ants-population-size)\n]"
+"worst" 1.0 0 -13345367 true "" "if ticks > 1 [\nlet max-penalty ([route] of (max-one-of ants [cost]))\nplot penalty-function max-penalty\n]"
+
+SLIDER
+220
+101
+423
+134
+max-iterations
+max-iterations
+10
+1000
+500.0
+1
+1
+NIL
+HORIZONTAL
+
+MONITOR
+585
+523
+667
+568
+N. Iteration
+iteration
+0
+1
+11
+
+@#$#@#$#@
+# INTRODUCCIÓN AL PROBLEMA 'SPACE TRUSS DESIGN'
+
+La optimización estructural es una de las áreas más activas de la ingeniería estructural en los últimos 10 años. Los problemas que la incluye se caracterizan por tener una gran cantidad de variables de diseño con gran cantidad de restricciones de diseño, además contiene en un gran espacio de búsqueda que requiere un tiempo razonable para realizar un diseño óptimo.
+
+En el diseño de una estructura de tipo "truss", el objetivo es minimizar el costo (está directamente relacionado con el peso) de una estructura dada mientras se satisfacen las restricciones de diseño, como los límites de deflexión nodal, la tensión permitida y la tensión de compresión.
+
+Este peso depende de las áreas de la sección transversal de cada miembro de la estructura. Entonces, el objetivo será seleccionar el área de la sección transversal de cada miembro para que el peso de la estructura se minimice y se cumplan todas las restricciones.
+
+El problema de optimización del truss se puede expresar como:
+
+
+![function](images/TrussDesignWeight.png)
+
+donde W es el peso de la armadura; nm: el número de miembros de la armadura, gamma: la densidad del material del miembro i; Li: longitud del miembro i; y Ai: el área de la sección transversal del miembro i entre Al y Au (límite inferior y límite superior).
+
+Los parámetros sigma y delta representan la tensión y la deflexión de la armadura, respectivamente, sometida a los límites superior e inferior [2].
+
+Muchos de los métodos de optimización clásicos requieren información de gradiente y el diseño final depende de los puntos seleccionados inicialmente. La complejidad aumenta a medida que las variables de diseño de una estructura se han desarrollado tantos métodos diferentes basados en diferentes heurísticas (incluidas algoritmos genéticos, inteligencia de enjambre, etc.) para resolver estos problemas.
+
+Ant Colony Optimization posee ventajas similares a los algoritmos evolutivos porque es un método de búsqueda aleatorizado y de múltiples agentes que no necesita que la función dada sea diferenciable.
+
+
+## ¿ QUÉ ES ?
+
+
+En este modelo, proponemos una implementación de ACO para el problema de diseño de una estructura de tipo truss de 25 barras o vigas. La siguiente imagen muestra la topología de una estructura para dicho número de barras (la topología fue propuesta en 1984 por Adeli y Kamal [1]).
+
+![25-bar](images/25-BarSpatialTruss.png)
+(Image from Kaveh,A. and Azar,B. [3])
+
+Hay un solo caso de carga y se proporciona la siguiente información [2]:
+
+- El módulo de elasticidad del material es de 10⁷ psi
+- La densidad de masa del material es de 0,1 lb / in³.
+- La tensión permitida para cada miembro de la armadura es +/- 40 ksi
+- El límite de desplazamiento permitido para cada articulación es de 0,35 pulgadas en los ejes x, y y z.
+
+El rango de áreas discretas de sección transversal para los miembros de la estructura es de 0,1 a 3,4 in² con un incremento de 0,1 in².
+
+Los 25 miembros están organizados en 8 grupos donde todos los miembros del mismo grupo comparten la misma área transversal. La siguiente tabla muestra la información del elemento [2]:
+
+![25-bar-groups](images/25-BarGroups.png)
+
+En este diseño de truss de 25 barras, se aplica un solo caso de carga a la estructura, como se indica en la siguiente tabla [2]:
+
+![load-case](images/25-BarLoadCase.png)
+
+(Nota: 1 kip = 4.45kN)
+
+
+## COMO FUNCIONA
+
+Los operadores del algoritmo ACO para el diseño de la estructura se han implementado siguiendo los descritos en el artículo de Camp C. y Bichon J. [2].
+
+El esquema de penalización también se describe aquí, pero el cálculo de la tensión y el desplazamiento lo explican con más claridad Adeli, H. y Kamal, O. [1] y [4].
+
+
+## COMO USARLO
+
+Presione el botón SETUP para crear la visualización de la topología, construir una solución aleatoria e inicializar todos los agentes (juntas, hormigas) y enlaces (bordes).
+
+Presione el botón GO para iniciar la simulación del modelo.
+
+Presione el botón STEP para ejecutar una iteración (tick) del modelo.
+
+
+=== Parámetros ===
+
+El control deslizante ANTS-POPULATION-SIZE controla el número de hormigas de nuestra colonia.
+
+El control deslizante MAX-ITERATIONS controla cuántas iteraciones desea que se ejecute el ACO.
+
+El interruptor RANKED-ANT-SYSTEM permite habilitar la variante Rank Ant System del algoritmo de optimización de colonias de hormigas. En esta variante, las soluciones se clasifican según su idoneidad y cada hormiga deposita una cantidad de feromona proporcional a la bondad de su solución (diseño de truss).
+
+El control deslizante TOP-RANKED-NUMBER controla cuántas hormigas queremos tener en cuanta a la hora de construir la clasificación.
+
+El control deslizante ALPHA controla la influencia de las hormigas de la feromona en los bordes.
+
+El control deslizante BETA controla la influencia de la heurística de visibilidad (cuán codiciosas son las hormigas).
+
+El control deslizante RHO controla el valor del parámetro de tasa de evaporación global.
+
+El control deslizante EPSILON controla el valor del parámetro de tasa de evaporación local.
+
+
+## COSAS A TENER EN CUENTA
+
+En el modelo, hay dos gráficos, uno de ellos muestra cómo el algoritmo de optimización de colonia de hormigas está calculando el peso del diseño de la estructura en cada iteración (para la mejor solución encontrada, para la peor y un promedio de todas las soluciones encontradas por las hormigas).
+El otro muestra la penalización de dichas soluciones.
+
+Observe que una solución de menor peso (por ejemplo, la peor solución) corresponde a una penalización más alta. La solución mejor fundamentada siempre tiene que terminar sin penalización (valor 0 en ésta) porque es un requisito del problema que se cumplan todas las restricciones.
+
+Si intentamos ejecutar la versión del "Rank Ant System" (basada en [5]), notaremos cómo la población de hormigas tiende a converger rápidamente a la solución mejor encontrada (la hormiga elitista) conforme la variable 'top-ranked-number' disminuye.
+La exploración se reduce en este caso, pero necesitamos menos iteraciones para converger. Sin embargo, las soluciones alcanzadas por ambas versiones son similares.
+
+
+## COSAS PARA PROBAR
+
+Podemos intentar cambiar los parámetros propios del problema (Truss Design) que son: tensión máxima permitida soportada, límite de desplazamiento, densidad y módulo de elasticidad. Veremos diferentes resultados de construcción de truss dependiendo de cuánta tensión debería soportar el truss o el desplazamiento que se permita a las uniones.
+
+También podemos intentar cambiar los parámetros ACO clásicos (alfa, beta, rho y tamaño de la población) para notar cómo influyen en el rendimiento del algoritmo.
+
+
+## AMPLIACIÓN DEL MODELO
+
+Para obtener resultados precisos, podemos hacer un algoritmo de **hibridación** que usa ACO y **Búsqueda local** para explotar las soluciones y hacerlas mejor.
+
+También podemos incluir un mecanismo que cambia el valor de la evaporación de feromonas local y global a medida que pasa el tiempo, y nos permite reducir la exploración cuando se alcanzan buenas soluciones.
+
+Si queremos reducir el espacio de búsqueda podemos implementar un mecanismo llamado 'Mecanismo de suboptimización', del inglés 'SubOptimization Mechanism' (SOM), y si queremos reducir el número de iteraciones sin disminuir la probabilidad de encontrar la solución óptima podemos utilizar el 'Mecanismo de memoria de dispersión', conocido como 'Scatter Memory Mechanism' (SMM).
+
+
+## CARACTERÍSTICAS DE NETLOGO
+
+Usamos la extensión **matrix** para facilitar las operaciones que involucran datos almacenados en matrices bidimensionales (como recuperación de datos, manipulación de datos, suma, resta, etc.) y para resolver ecuaciones lineales fácilmente:
+
+```
+extensions [matrix]
+
+; Por ejemplo para calcular la traspuesta de una matriz
+let matrix-t (matrix:transpose matrix)
+
+; Suma de matriz con su traspuesta
+let result (matrix:plus matrix-t matrix) 
+
+; Convertir los elementos de la matriz a una lista de Netlogo
+set list (matrix:from-row-list matrix)
+```
+
+
+## CRÉDITOS
+
+Este modelo es una implementación del Algoritmo de Colonia de Hormigas, del inglés Ant Colony Optimization (ACO) para el problema 25-Bar Truss Design Problem.
+
+Forma parte del proyecto fin de grado (TFG) de Jose A. Martín Melguizo, dirigido por Rocio Romero Zaliz en la Universidad de Granada (UGR)
+
+Granada, 17 de Mayo, 2021
+
+This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 License.  To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/ or send a letter to Creative Commons, 559 Nathan Abbott Way, Stanford, California 94305, USA.
+
+![CC BY-NC-SA 4.0](https://licensebuttons.net/l/by-nc-sa/3.0/88x31.png)
+
+
+## REFERENCIAS
+
+[1] Adeli, H., Kamal, O. “Efficient optimization of space trusses. Computers and Structures“ 1986;24(3):501–511.
+
+[2] Camp C. and Bichon J. “Design of space trusses using ant colony optimization,” Journal of Structural Engineering, ASCE 2004; 130(5):741–751.
+
+[3] Kaveh, A., Azar, B. F., & Talatahari, S. (2008). Ant Colony Optimization for Design of Space Trusses. International Journal of Space Structures, 23(3), 167–181.
+
+[4] Chapter 3a – Development Of Truss Equations pg 47-53
+http://www.ce.memphis.edu/7117/notes/presentations/chapter_03a.pdf
+
+[5] Hasançebi O, Çarbaş S. ANT COLONY SEARCH METHOD IN PRACTICAL STRUCTURAL OPTIMIZATION. International Journal of Optimization in Civil Engineering. 2011; 1 (1) :91-105
+@#$#@#$#@
+default
+true
+0
+Polygon -7500403 true true 150 5 40 250 150 205 260 250
+
+airplane
+true
+0
+Polygon -7500403 true true 150 0 135 15 120 60 120 105 15 165 15 195 120 180 135 240 105 270 120 285 150 270 180 285 210 270 165 240 180 180 285 195 285 165 180 105 180 60 165 15
+
+ant
+true
+0
+Polygon -7500403 true true 136 61 129 46 144 30 119 45 124 60 114 82 97 37 132 10 93 36 111 84 127 105 172 105 189 84 208 35 171 11 202 35 204 37 186 82 177 60 180 44 159 32 170 44 165 60
+Polygon -7500403 true true 150 95 135 103 139 117 125 149 137 180 135 196 150 204 166 195 161 180 174 150 158 116 164 102
+Polygon -7500403 true true 149 186 128 197 114 232 134 270 149 282 166 270 185 232 171 195 149 186
+Polygon -7500403 true true 225 66 230 107 159 122 161 127 234 111 236 106
+Polygon -7500403 true true 78 58 99 116 139 123 137 128 95 119
+Polygon -7500403 true true 48 103 90 147 129 147 130 151 86 151
+Polygon -7500403 true true 65 224 92 171 134 160 135 164 95 175
+Polygon -7500403 true true 235 222 210 170 163 162 161 166 208 174
+Polygon -7500403 true true 249 107 211 147 168 147 168 150 213 150
+
+arrow
+true
+0
+Polygon -7500403 true true 150 0 0 150 105 150 105 293 195 293 195 150 300 150
+
+box
+false
+0
+Polygon -7500403 true true 150 285 285 225 285 75 150 135
+Polygon -7500403 true true 150 135 15 75 150 15 285 75
+Polygon -7500403 true true 15 75 15 225 150 285 150 135
+Line -16777216 false 150 285 150 135
+Line -16777216 false 150 135 15 75
+Line -16777216 false 150 135 285 75
+
+bug
+true
+0
+Circle -7500403 true true 96 182 108
+Circle -7500403 true true 110 127 80
+Circle -7500403 true true 110 75 80
+Line -7500403 true 150 100 80 30
+Line -7500403 true 150 100 220 30
+
+butterfly
+true
+0
+Polygon -7500403 true true 150 165 209 199 225 225 225 255 195 270 165 255 150 240
+Polygon -7500403 true true 150 165 89 198 75 225 75 255 105 270 135 255 150 240
+Polygon -7500403 true true 139 148 100 105 55 90 25 90 10 105 10 135 25 180 40 195 85 194 139 163
+Polygon -7500403 true true 162 150 200 105 245 90 275 90 290 105 290 135 275 180 260 195 215 195 162 165
+Polygon -16777216 true false 150 255 135 225 120 150 135 120 150 105 165 120 180 150 165 225
+Circle -16777216 true false 135 90 30
+Line -16777216 false 150 105 195 60
+Line -16777216 false 150 105 105 60
+
+car
+false
+0
+Polygon -7500403 true true 300 180 279 164 261 144 240 135 226 132 213 106 203 84 185 63 159 50 135 50 75 60 0 150 0 165 0 225 300 225 300 180
+Circle -16777216 true false 180 180 90
+Circle -16777216 true false 30 180 90
+Polygon -16777216 true false 162 80 132 78 134 135 209 135 194 105 189 96 180 89
+Circle -7500403 true true 47 195 58
+Circle -7500403 true true 195 195 58
+
+circle
+false
+0
+Circle -7500403 true true 0 0 300
+
+circle 2
+false
+0
+Circle -7500403 true true 0 0 300
+Circle -16777216 true false 30 30 240
+
+cow
+false
+0
+Polygon -7500403 true true 200 193 197 249 179 249 177 196 166 187 140 189 93 191 78 179 72 211 49 209 48 181 37 149 25 120 25 89 45 72 103 84 179 75 198 76 252 64 272 81 293 103 285 121 255 121 242 118 224 167
+Polygon -7500403 true true 73 210 86 251 62 249 48 208
+Polygon -7500403 true true 25 114 16 195 9 204 23 213 25 200 39 123
+
+cylinder
+false
+0
+Circle -7500403 true true 0 0 300
+
+dot
+false
+0
+Circle -7500403 true true 90 90 120
+
+face happy
+false
+0
+Circle -7500403 true true 8 8 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Polygon -16777216 true false 150 255 90 239 62 213 47 191 67 179 90 203 109 218 150 225 192 218 210 203 227 181 251 194 236 217 212 240
+
+face neutral
+false
+0
+Circle -7500403 true true 8 7 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Rectangle -16777216 true false 60 195 240 225
+
+face sad
+false
+0
+Circle -7500403 true true 8 8 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Polygon -16777216 true false 150 168 90 184 62 210 47 232 67 244 90 220 109 205 150 198 192 205 210 220 227 242 251 229 236 206 212 183
+
+fish
+false
+0
+Polygon -1 true false 44 131 21 87 15 86 0 120 15 150 0 180 13 214 20 212 45 166
+Polygon -1 true false 135 195 119 235 95 218 76 210 46 204 60 165
+Polygon -1 true false 75 45 83 77 71 103 86 114 166 78 135 60
+Polygon -7500403 true true 30 136 151 77 226 81 280 119 292 146 292 160 287 170 270 195 195 210 151 212 30 166
+Circle -16777216 true false 215 106 30
+
+flag
+false
+0
+Rectangle -7500403 true true 60 15 75 300
+Polygon -7500403 true true 90 150 270 90 90 30
+Line -7500403 true 75 135 90 135
+Line -7500403 true 75 45 90 45
+
+flower
+false
+0
+Polygon -10899396 true false 135 120 165 165 180 210 180 240 150 300 165 300 195 240 195 195 165 135
+Circle -7500403 true true 85 132 38
+Circle -7500403 true true 130 147 38
+Circle -7500403 true true 192 85 38
+Circle -7500403 true true 85 40 38
+Circle -7500403 true true 177 40 38
+Circle -7500403 true true 177 132 38
+Circle -7500403 true true 70 85 38
+Circle -7500403 true true 130 25 38
+Circle -7500403 true true 96 51 108
+Circle -16777216 true false 113 68 74
+Polygon -10899396 true false 189 233 219 188 249 173 279 188 234 218
+Polygon -10899396 true false 180 255 150 210 105 210 75 240 135 240
+
+house
+false
+0
+Rectangle -7500403 true true 45 120 255 285
+Rectangle -16777216 true false 120 210 180 285
+Polygon -7500403 true true 15 120 150 15 285 120
+Line -16777216 false 30 120 270 120
+
+leaf
+false
+0
+Polygon -7500403 true true 150 210 135 195 120 210 60 210 30 195 60 180 60 165 15 135 30 120 15 105 40 104 45 90 60 90 90 105 105 120 120 120 105 60 120 60 135 30 150 15 165 30 180 60 195 60 180 120 195 120 210 105 240 90 255 90 263 104 285 105 270 120 285 135 240 165 240 180 270 195 240 210 180 210 165 195
+Polygon -7500403 true true 135 195 135 240 120 255 105 255 105 285 135 285 165 240 165 195
+
+line
+true
+0
+Line -7500403 true 150 0 150 300
+
+line half
+true
+0
+Line -7500403 true 150 0 150 150
+
+pentagon
+false
+0
+Polygon -7500403 true true 150 15 15 120 60 285 240 285 285 120
+
+person
+false
+0
+Circle -7500403 true true 110 5 80
+Polygon -7500403 true true 105 90 120 195 90 285 105 300 135 300 150 225 165 300 195 300 210 285 180 195 195 90
+Rectangle -7500403 true true 127 79 172 94
+Polygon -7500403 true true 195 90 240 150 225 180 165 105
+Polygon -7500403 true true 105 90 60 150 75 180 135 105
+
+plant
+false
+0
+Rectangle -7500403 true true 135 90 165 300
+Polygon -7500403 true true 135 255 90 210 45 195 75 255 135 285
+Polygon -7500403 true true 165 255 210 210 255 195 225 255 165 285
+Polygon -7500403 true true 135 180 90 135 45 120 75 180 135 210
+Polygon -7500403 true true 165 180 165 210 225 180 255 120 210 135
+Polygon -7500403 true true 135 105 90 60 45 45 75 105 135 135
+Polygon -7500403 true true 165 105 165 135 225 105 255 45 210 60
+Polygon -7500403 true true 135 90 120 45 150 15 180 45 165 90
+
+sheep
+false
+15
+Circle -1 true true 203 65 88
+Circle -1 true true 70 65 162
+Circle -1 true true 150 105 120
+Polygon -7500403 true false 218 120 240 165 255 165 278 120
+Circle -7500403 true false 214 72 67
+Rectangle -1 true true 164 223 179 298
+Polygon -1 true true 45 285 30 285 30 240 15 195 45 210
+Circle -1 true true 3 83 150
+Rectangle -1 true true 65 221 80 296
+Polygon -1 true true 195 285 210 285 210 240 240 210 195 210
+Polygon -7500403 true false 276 85 285 105 302 99 294 83
+Polygon -7500403 true false 219 85 210 105 193 99 201 83
+
+square
+false
+0
+Rectangle -7500403 true true 30 30 270 270
+
+square 2
+false
+0
+Rectangle -7500403 true true 30 30 270 270
+Rectangle -16777216 true false 60 60 240 240
+
+star
+false
+0
+Polygon -7500403 true true 151 1 185 108 298 108 207 175 242 282 151 216 59 282 94 175 3 108 116 108
+
+target
+false
+0
+Circle -7500403 true true 0 0 300
+Circle -16777216 true false 30 30 240
+Circle -7500403 true true 60 60 180
+Circle -16777216 true false 90 90 120
+Circle -7500403 true true 120 120 60
+
+tree
+false
+0
+Circle -7500403 true true 118 3 94
+Rectangle -6459832 true false 120 195 180 300
+Circle -7500403 true true 65 21 108
+Circle -7500403 true true 116 41 127
+Circle -7500403 true true 45 90 120
+Circle -7500403 true true 104 74 152
+
+triangle
+false
+0
+Polygon -7500403 true true 150 30 15 255 285 255
+
+triangle 2
+false
+0
+Polygon -7500403 true true 150 30 15 255 285 255
+Polygon -16777216 true false 151 99 225 223 75 224
+
+truck
+false
+0
+Rectangle -7500403 true true 4 45 195 187
+Polygon -7500403 true true 296 193 296 150 259 134 244 104 208 104 207 194
+Rectangle -1 true false 195 60 195 105
+Polygon -16777216 true false 238 112 252 141 219 141 218 112
+Circle -16777216 true false 234 174 42
+Rectangle -7500403 true true 181 185 214 194
+Circle -16777216 true false 144 174 42
+Circle -16777216 true false 24 174 42
+Circle -7500403 false true 24 174 42
+Circle -7500403 false true 144 174 42
+Circle -7500403 false true 234 174 42
+
+turtle
+true
+0
+Polygon -10899396 true false 215 204 240 233 246 254 228 266 215 252 193 210
+Polygon -10899396 true false 195 90 225 75 245 75 260 89 269 108 261 124 240 105 225 105 210 105
+Polygon -10899396 true false 105 90 75 75 55 75 40 89 31 108 39 124 60 105 75 105 90 105
+Polygon -10899396 true false 132 85 134 64 107 51 108 17 150 2 192 18 192 52 169 65 172 87
+Polygon -10899396 true false 85 204 60 233 54 254 72 266 85 252 107 210
+Polygon -7500403 true true 119 75 179 75 209 101 224 135 220 225 175 261 128 261 81 224 74 135 88 99
+
+wheel
+false
+0
+Circle -7500403 true true 3 3 294
+Circle -16777216 true false 30 30 240
+Line -7500403 true 150 285 150 15
+Line -7500403 true 15 150 285 150
+Circle -7500403 true true 120 120 60
+Line -7500403 true 216 40 79 269
+Line -7500403 true 40 84 269 221
+Line -7500403 true 40 216 269 79
+Line -7500403 true 84 40 221 269
+
+wolf
+false
+0
+Polygon -16777216 true false 253 133 245 131 245 133
+Polygon -7500403 true true 2 194 13 197 30 191 38 193 38 205 20 226 20 257 27 265 38 266 40 260 31 253 31 230 60 206 68 198 75 209 66 228 65 243 82 261 84 268 100 267 103 261 77 239 79 231 100 207 98 196 119 201 143 202 160 195 166 210 172 213 173 238 167 251 160 248 154 265 169 264 178 247 186 240 198 260 200 271 217 271 219 262 207 258 195 230 192 198 210 184 227 164 242 144 259 145 284 151 277 141 293 140 299 134 297 127 273 119 270 105
+Polygon -7500403 true true -1 195 14 180 36 166 40 153 53 140 82 131 134 133 159 126 188 115 227 108 236 102 238 98 268 86 269 92 281 87 269 103 269 113
+
+x
+false
+0
+Polygon -7500403 true true 270 75 225 30 30 225 75 270
+Polygon -7500403 true true 30 75 75 30 270 225 225 270
+@#$#@#$#@
+NetLogo 3D 6.2.0
+@#$#@#$#@
+need-to-manually-make-preview-for-this-model
+@#$#@#$#@
+@#$#@#$#@
+@#$#@#$#@
+@#$#@#$#@
+default
+0.0
+-0.2 0 0.0 1.0
+0.0 1 1.0 0.0
+0.2 0 0.0 1.0
+link direction
+true
+0
+Line -7500403 true 150 150 90 180
+Line -7500403 true 150 150 210 180
+
+truss
+0.0
+-0.2 0 0.0 1.0
+0.0 1 1.0 0.0
+0.2 0 0.0 1.0
+link direction
+true
+0
+@#$#@#$#@
+0
+@#$#@#$#@
